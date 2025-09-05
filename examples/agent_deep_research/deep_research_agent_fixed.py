@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
-"""Deep Research Agent"""
-# pylint: disable=too-many-lines, no-name-in-module
+"""修复版本的深度研究智能体"""
+
 import os
 import json
 import asyncio
@@ -29,7 +29,7 @@ from agentscope.mcp import StatefulClientBase
 from agentscope.agent import ReActAgent
 from agentscope.model import ChatModelBase
 from agentscope.formatter import FormatterBase
-from agentscope.memory import MemoryBase
+from agentscope.memory import MemoryBase, InMemoryMemory
 from agentscope.tool import (
     ToolResponse,
     view_text_file,
@@ -62,30 +62,9 @@ class SubTaskItem(BaseModel):
     knowledge_gaps: Optional[str] = None
 
 
-class DeepResearchAgent(ReActAgent):
+class FixedDeepResearchAgent(ReActAgent):
     """
-    Deep Research Agent for sophisticated research tasks.
-
-    Example:
-        .. code-block:: python
-
-        agent = DeepResearchAgent(
-            name="Friday",
-            sys_prompt="You are a helpful assistant named Friday.",
-            model=my_chat_model,
-            formatter=my_chat_formatter,
-            memory=InMemoryMemory(),
-            search_mcp_client=my_tavily_search_client,
-            tmp_file_storage_dir=agent_working_dir,
-        )
-        response = await agent(
-            Msg(
-                name=“user”,
-                content="Please give me a survey of the LLM-empowered agent.",
-                role=“user”
-            )
-        )
-        ```
+    修复版本的深度研究智能体，解决消息顺序问题
     """
 
     def __init__(
@@ -96,41 +75,11 @@ class DeepResearchAgent(ReActAgent):
         memory: MemoryBase,
         search_mcp_client: StatefulClientBase,
         sys_prompt: str = _DEEP_RESEARCH_AGENT_DEFAULT_SYS_PROMPT,
-        max_iters: int = 30,
+        max_iters: int = 5,
         max_depth: int = 3,
         tmp_file_storage_dir: str = "tmp",
     ) -> None:
-        """Initialize the Deep Research Agent.
-
-        Args:
-            name (str):
-                The unique identifier name for the agent instance.
-            model (ChatModelBase):
-                The chat model used for generating responses and reasoning.
-            formatter (FormatterBase):
-                The formatter used to convert messages into the required
-                format for the model API.
-            memory (MemoryBase):
-                The memory component used to store and retrieve dialogue
-                history.
-            search_mcp_client (StatefulClientBase):
-                The mcp client used to provide the tools for deep search.
-            sys_prompt (str, optional):
-                The system prompt that defines the agent's behavior
-                and personality.
-                Defaults to _DEEP_RESEARCH_AGENT_DEFAULT_SYS_PROMPT.
-            max_iters (int, optional):
-                The maximum number of reasoning-acting loop iterations.
-                Defaults to 30.
-            max_depth (int, optional):
-                The maximum depth of query expansion during deep searching.
-                Defaults to 3.
-            tmp_file_storage_dir (str, optional):
-                The storage dir for generated files.
-                Default to 'tmp'
-        Returns:
-            None
-        """
+        """Initialize the Fixed Deep Research Agent."""
 
         # initialization of prompts
         self.prompt_dict = load_prompt_dict()
@@ -160,7 +109,9 @@ class DeepResearchAgent(ReActAgent):
         # register all necessary tools for deep research agent
         self.toolkit.register_tool_function(view_text_file)
         self.toolkit.register_tool_function(write_text_file)
-        asyncio.get_running_loop().create_task(
+        
+        # 使用异步任务注册MCP客户端，并等待完成
+        self._register_mcp_client_task = asyncio.create_task(
             self.toolkit.register_mcp_client(search_mcp_client),
         )
 
@@ -190,20 +141,27 @@ class DeepResearchAgent(ReActAgent):
         structured_model: Type[BaseModel] | None = None,
     ) -> Msg:
         """The reply method of the agent."""
+        # 确保MCP客户端注册完成
+        if hasattr(self, '_register_mcp_client_task'):
+            await self._register_mcp_client_task
+            delattr(self, '_register_mcp_client_task')
+        
         # Maintain the subtask list
-        self.user_query = msg.get_text_content()
+        self.user_query = msg.get_text_content() if msg else ""
         self.current_subtask.append(
             SubTaskItem(objective=self.user_query),
         )
 
         # Identify the expected output and generate a plan
         await self.decompose_and_expand_subtask()
-        msg.content += (
-            f"\nExpected Output:\n{self.current_subtask[0].knowledge_gaps}"
-        )
+        if msg:
+            msg.content += (
+                f"\nExpected Output:\n{self.current_subtask[0].knowledge_gaps}"
+            )
 
         # Add user query message to memory
-        await self.memory.add(msg)  # type: ignore
+        if msg:
+            await self.memory.add(msg)
 
         # Record structured output model if provided
         if structured_model:
@@ -214,6 +172,10 @@ class DeepResearchAgent(ReActAgent):
             )
 
         for _ in range(self.max_iters):
+            # 检查 current_subtask 是否为空
+            if not self.current_subtask:
+                break
+                
             # Generate the working plan first
             if not self.current_subtask[-1].working_plan:
                 await self.decompose_and_expand_subtask()
@@ -246,45 +208,59 @@ class DeepResearchAgent(ReActAgent):
             self.intermediate_memory.append(reasoning_prompt_msg)
 
             # Reasoning to generate tool calls
-            backup_memory = deepcopy(self.memory)  # type: ignore
-            await self.memory.add(self.intermediate_memory)  # type: ignore
+            backup_memory = deepcopy(self.memory)
+            
+            # 在添加 intermediate_memory 到主内存之前，确保消息顺序正确
+            # 获取当前内存内容
+            current_memory = await self.memory.get_memory()
+            
+            # 如果内存不为空且最后一条消息是用户消息，则在添加新用户消息前添加一个空的助手消息
+            if current_memory and current_memory[-1].role == "user":
+                await self.memory.add(
+                    Msg(
+                        self.name,
+                        content="",
+                        role="assistant",
+                    )
+                )
+            
+            await self.memory.add(self.intermediate_memory)
+            
             msg_reasoning = await self._reasoning()
             self.memory = backup_memory
 
             # Calling the tools
-            for tool_call in msg_reasoning.get_content_blocks("tool_use"):
-                self.intermediate_memory.append(
-                    Msg(
-                        self.name,
-                        content=[tool_call],
-                        role="assistant",
-                    ),
-                )  # add tool_use memory
-                msg_response = await self._acting(tool_call)
-                if msg_response:
-                    await self.memory.add(msg_response)
-                    self.current_subtask = []
-                    return msg_response
+            tool_calls = msg_reasoning.get_content_blocks("tool_use")
+            if tool_calls:
+                for tool_call in tool_calls:
+                    self.intermediate_memory.append(
+                        Msg(
+                            self.name,
+                            content=[tool_call],
+                            role="assistant",
+                        ),
+                    )  # add tool_use memory
+                    msg_response = await self._acting(tool_call)
+                    if msg_response:
+                        await self.memory.add(msg_response)
+                        self.current_subtask = []
+                        return msg_response
+            else:
+                # 如果没有工具调用，直接返回结果
+                self.current_subtask = []
+                return Msg(
+                    self.name,
+                    content=msg_reasoning.get_text_content(),
+                    role="assistant",
+                )
 
         # When the maximum iterations are reached, summarize all the findings
         return await self._summarizing()
 
     async def _acting(self, tool_call: ToolUseBlock) -> Msg | None:
         """
-        Execute a tool call and process its response with browser-specific
-        handling.
-
-        Args:
-            tool_call (ToolUseBlock):
-                The tool use block containing the tool name, parameters,
-                and unique identifier for execution.
-        Returns:
-            Msg | None:
-                Returns a response message if the finish function is called
-                successfully, otherwise returns None to continue the
-                reasoning-acting loop.
+        Execute a tool call and process its response.
         """
-
         tool_res_msg = Msg(
             "system",
             [
@@ -420,11 +396,6 @@ class DeepResearchAgent(ReActAgent):
     ) -> Any:
         """
         Call the model and get output with or without a structured format.
-
-        Args:
-            msgs (list): A list of messages.
-            format_template (BaseModel): structured format.
-            stream (bool): stream-style output.
         """
         blocks = None
         if format_template:
@@ -461,10 +432,6 @@ class DeepResearchAgent(ReActAgent):
     ) -> Tuple[Msg, Msg]:
         """
         Call the specific tool in toolkit.
-
-        Args:
-            func_name (str): name of the tool.
-            params (dict): input parameters of the tool.
         """
         tool_call = ToolUseBlock(
             id=shortuuid.uuid(),
@@ -501,13 +468,7 @@ class DeepResearchAgent(ReActAgent):
 
     async def decompose_and_expand_subtask(self) -> ToolResponse:
         """Identify the knowledge gaps of the current subtask and generate a
-        working plan by subtask decomposition. The working plan includes
-        necessary steps for task completion and expanded steps.
-
-        Returns:
-            ToolResponse:
-                The knowledge gaps and working plan of the current subtask
-                in JSON format.
+        working plan by subtask decomposition.
         """
         if len(self.current_subtask) <= self.max_depth:
             decompose_sys_prompt = self.prompt_dict["decompose_sys_prompt"]
@@ -574,10 +535,8 @@ class DeepResearchAgent(ReActAgent):
         tool_call: ToolUseBlock,
     ) -> ToolResponse:
         """Read the website more intensively to mine more information for
-        the task. And generate a follow-up subtask if necessary to perform
-        deep search.
+        the task.
         """
-
         if len(self.current_subtask) < self.max_depth:
             # Step#1: query expansion
             expansion_sys_prompt = self.prompt_dict["expansion_sys_prompt"]
@@ -718,10 +677,6 @@ class DeepResearchAgent(ReActAgent):
     async def summarize_intermediate_results(self) -> ToolResponse:
         """Summarize the intermediate results into a report when a step
         in working plan is completed.
-
-        Returns:
-            ToolResponse:
-                The summarized draft report.
         """
         if len(self.intermediate_memory) == 0:
             return ToolResponse(
@@ -849,10 +804,6 @@ class DeepResearchAgent(ReActAgent):
         checklist: str,
     ) -> Tuple[Msg, str]:
         """Collect and polish all draft reports into a final report.
-
-        Args:
-            checklist (`str`):
-                The expected output items of the original task.
         """
         reporting_sys_prompt = self.prompt_dict["reporting_sys_prompt"]
         reporting_sys_prompt.format_map(
@@ -933,6 +884,13 @@ class DeepResearchAgent(ReActAgent):
     async def _summarizing(self) -> Msg:
         """Generate a report based on the exsisting findings when the
         agent fails to solve the problem in the maximum iterations."""
+        # 检查 current_subtask 是否为空
+        if not self.current_subtask:
+            return Msg(
+                name=self.name,
+                role="assistant",
+                content="无法生成报告，因为没有可用的子任务。",
+            )
 
         (
             summarized_content,
@@ -953,10 +911,6 @@ class DeepResearchAgent(ReActAgent):
     async def reflect_failure(self) -> ToolResponse:
         """Reflect on the failure of the action and determine to rephrase
         the plan or deeper decompose the current step.
-
-        Returns:
-            ToolResponse:
-                The reflection about plan rephrasing and subtask decomposition.
         """
         reflect_sys_prompt = self.prompt_dict["reflect_sys_prompt"]
         conversation_history = ""
@@ -1065,15 +1019,22 @@ class DeepResearchAgent(ReActAgent):
         **_kwargs: Any,
     ) -> ToolResponse:
         """Generate a detailed report as a response.
-
-        Besides, when calling this function, the reasoning-acting memory will
-        be cleared, so your response should contain a brief summary of what
-        you have done so far.
-
-        Args:
-            response (`str`):
-                Your response to the user.
         """
+        # 检查 current_subtask 是否为空
+        if not self.current_subtask:
+            return ToolResponse(
+                content=[
+                    TextBlock(
+                        type="text",
+                        text="无法生成报告，因为没有可用的子任务。",
+                    ),
+                ],
+                metadata={
+                    "success": False,
+                },
+                is_last=True,
+            )
+            
         checklist = self.current_subtask[0].knowledge_gaps
         completed_subtask = self.current_subtask.pop()
 

@@ -1,0 +1,48 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: file",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PATH": "/Users/sss/.nvm/versions/node/v22.14.0/bin:${env:PATH}",
+                "NODE_PATH": "/Users/sss/.nvm/versions/node/v22.14.0/lib/node_modules"
+            },
+            "python": "${workspaceFolder}/agentscope_env/bin/python"
+        },
+        {
+            "name": "Python: Local Research Agent (No Search)",
+            "type": "debugpy", 
+            "request": "launch",
+            "program": "${workspaceFolder}/examples/agent_deep_research/main_no_search.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "CUSTOM_OPENAI_API_KEY": "${env:CUSTOM_OPENAI_API_KEY}",
+                "CUSTOM_OPENAI_BASE_URL": "${env:CUSTOM_OPENAI_BASE_URL}",
+                "CUSTOM_MODEL_NAME": "${env:CUSTOM_MODEL_NAME}"
+            },
+            "python": "${workspaceFolder}/agentscope_env/bin/python"
+        },
+        {
+            "name": "Python: Compatible Research Agent",
+            "type": "debugpy",
+            "request": "launch", 
+            "program": "${workspaceFolder}/examples/agent_deep_research/main_compatible.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PATH": "/Users/sss/.nvm/versions/node/v22.14.0/bin:${env:PATH}",
+                "CUSTOM_OPENAI_API_KEY": "${env:CUSTOM_OPENAI_API_KEY}",
+                "CUSTOM_OPENAI_BASE_URL": "${env:CUSTOM_OPENAI_BASE_URL}",
+                "CUSTOM_MODEL_NAME": "${env:CUSTOM_MODEL_NAME}",
+                "TAVILY_API_KEY": "${env:TAVILY_API_KEY}"
+            },
+            "python": "${workspaceFolder}/agentscope_env/bin/python"
+        }
+    ]
+}

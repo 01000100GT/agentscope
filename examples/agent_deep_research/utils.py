@@ -149,6 +149,10 @@ def get_structure_output(blocks: list | Sequence) -> dict:
         result = PromptBase.get_structure_output(blocks)
         # result: {"name": "test", "value": 42}
     """
+    
+    # 检查 blocks 是否为 None
+    if blocks is None:
+        return {}
 
     dict_output = {}
     for block in blocks:

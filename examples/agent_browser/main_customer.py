@@ -1,11 +1,23 @@
 # -*- coding: utf-8 -*-
 """The main entry point of the browser agent example."""
+
 import asyncio
 import os
+from pathlib import Path
 
-from agentscope.formatter import DashScopeChatFormatter
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    # Look for .env file in project root
+    env_path = Path(__file__).parent.parent.parent / ".env"
+    load_dotenv(env_path)
+except ImportError:
+    print("python-dotenv not installed. Please install it with: pip install python-dotenv")
+    print("Or set environment variables manually.")
+
+from agentscope.formatter import OpenAIChatFormatter
 from agentscope.memory import InMemoryMemory
-from agentscope.model import DashScopeChatModel
+from agentscope.model import OpenAIChatModel
 from agentscope.tool import Toolkit
 from agentscope.mcp import StdIOStatefulClient
 from agentscope.agent import UserAgent
@@ -28,20 +40,25 @@ async def main() -> None:
         await browser_client.connect()
         await toolkit.register_mcp_client(browser_client)
 
-        # Get API key and ensure it exists
-        api_key = os.environ.get("DASHSCOPE_API_KEY")
+        # Get custom OpenAI API configuration
+        api_key = os.environ.get("CUSTOM_OPENAI_API_KEY")
+        base_url = os.environ.get("CUSTOM_OPENAI_BASE_URL")
+        model_name = os.environ.get("CUSTOM_MODEL_NAME", "gpt-3.5-turbo")
+
         if api_key is None:
-            raise ValueError("DASHSCOPE_API_KEY environment variable is required")
-        
+            raise ValueError("CUSTOM_OPENAI_API_KEY environment variable is required")
+        if base_url is None:
+            raise ValueError("CUSTOM_OPENAI_BASE_URL environment variable is required")
         # Create browser agent
         agent = BrowserAgent(
             name="BrowserBot",
-            model=DashScopeChatModel(
+            model=OpenAIChatModel(
+                model_name=model_name,
                 api_key=api_key,
-                model_name="qwen-max",
+                client_args={"base_url": base_url},
                 stream=True,
             ),
-            formatter=DashScopeChatFormatter(),
+            formatter=OpenAIChatFormatter(),
             memory=InMemoryMemory(),
             toolkit=toolkit,
             max_iters=50,

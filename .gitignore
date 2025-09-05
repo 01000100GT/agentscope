@@ -136,3 +136,6 @@ dmypy.json
 # docs
 docs/tutorial/en/build/
 docs/tutorial/zh_CN/build/
+
+agentscope_env/
+examples/agent_deep_research/log/

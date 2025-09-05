@@ -15,7 +15,7 @@ class EmbeddingCacheTest(IsolatedAsyncioTestCase):
 
     async def asyncSetUp(self) -> None:
         """Set up the test case."""
-        self.embeddings = [[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]]
+        self.embeddings = [[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]]
         self.identifier1 = {
             "model": "text-embedding-v1",
             "text": ["This is a test text for embedding cache."],
@@ -79,7 +79,7 @@ class EmbeddingCacheTest(IsolatedAsyncioTestCase):
         time.sleep(1)
 
         # when overwrite is False
-        await self.embedding_cache.store([[1, 2]], self.identifier1)
+        await self.embedding_cache.store([[1.0, 2.0]], self.identifier1)
         self.assertListEqual(
             self._get_filenames(self.embedding_cache.cache_dir),
             self.ground_truth_filenames[:1],
@@ -87,6 +87,7 @@ class EmbeddingCacheTest(IsolatedAsyncioTestCase):
         cached_embedding = await self.embedding_cache.retrieve(
             self.identifier1,
         )
+        assert cached_embedding is not None
         self.assertListEqual(
             cached_embedding,
             self.embeddings,
@@ -96,7 +97,7 @@ class EmbeddingCacheTest(IsolatedAsyncioTestCase):
 
         # when overwrite is True
         await self.embedding_cache.store(
-            [[1, 2]],
+            [[1.0, 2.0]],
             self.identifier1,
             overwrite=True,
         )
@@ -107,9 +108,10 @@ class EmbeddingCacheTest(IsolatedAsyncioTestCase):
         cached_embedding = await self.embedding_cache.retrieve(
             self.identifier1,
         )
+        assert cached_embedding is not None
         self.assertListEqual(
             cached_embedding,
-            [[1, 2]],
+            [[1.0, 2.0]],
         )
 
         time.sleep(1)

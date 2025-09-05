@@ -2,7 +2,6 @@
 
 This example demonstrates how to use AgentScope's BrowserAgent for web automation tasks. The BrowserAgent leverages the Model Context Protocol (MCP) to interact with browser tools powered by Playwright, enabling sophisticated web navigation, data extraction, and automation.
 
-
 ## Prerequisites
 
 - Python 3.10 or higher
